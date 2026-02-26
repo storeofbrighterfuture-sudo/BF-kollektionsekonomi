@@ -7,35 +7,51 @@
   <style>
     body { font-family: Arial, sans-serif; padding: 18px; max-width: 760px; margin: 0 auto; }
     h1 { margin: 0 0 10px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin: 12px 0; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin: 12px 0; background: #fff; }
     label { display:block; font-weight: 600; margin: 10px 0 6px; }
     input, select, textarea {
-      width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px;
-      font-size: 16px; box-sizing: border-box;
+      width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 10px;
+      font-size: 16px; box-sizing: border-box; background: #fff;
     }
     button {
-      margin-top: 12px; padding: 12px 14px; border-radius: 10px; border: none;
+      margin-top: 12px; padding: 12px 14px; border-radius: 12px; border: none;
       background: black; color: white; font-size: 16px; cursor: pointer;
     }
     button.secondary { background: #eee; color: #111; border: 1px solid #ddd; }
+    button.danger { background: #f3f3f3; color: #111; border: 1px solid #ddd; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .muted { color: #666; font-size: 14px; }
     .ok { color: #0a7a2f; font-weight: 700; }
     .err { color: #b00020; font-weight: 700; }
     .result { background: #f6f6f6; padding: 12px; border-radius: 10px; margin-top: 12px; }
     .list { margin-top: 10px; }
-    .item { padding: 10px; border-top: 1px solid #eee; }
+    .item { padding: 12px 10px; border-top: 1px solid #eee; }
     .item:first-child { border-top: none; }
     .flex { display:flex; gap: 10px; align-items:center; justify-content: space-between; }
     .small { font-size: 13px; color:#555; }
-    .rowBtns { display:flex; gap:10px; flex-wrap: wrap; margin-top:10px; }
-    .rowBtns button { margin-top:0; }
+    .pill { display:inline-block; padding: 6px 10px; border-radius: 999px; background:#f6f6f6; border:1px solid #eee; font-size: 12px; color:#444; }
+    .gap { height: 8px; }
   </style>
 </head>
 <body>
   <h1>BF Kollektionsekonomi</h1>
   <div class="muted">Logga omsättning & kostnader per partner. Räknar 30% till föreningen.</div>
 
+  <!-- ADMIN: Skapa partner -->
+  <div class="card">
+    <b>Partners (admin)</b>
+    <div class="small">Skapa partner direkt här. (Kräver INSERT-policy på <span class="pill">partners</span>)</div>
+
+    <label>Partnernamn</label>
+    <input id="newPartnerName" type="text" placeholder="t.ex. Essinge Rovers" />
+
+    <button id="createPartnerBtn" type="button">Skapa partner</button>
+    <button class="secondary" id="reloadPartnersBtn" type="button">Uppdatera partnerlista</button>
+
+    <div class="muted" id="partnersAdminStatus" style="margin-top:10px;"></div>
+  </div>
+
+  <!-- LOGGA ENTRIES -->
   <div class="card">
     <div class="muted" id="status">Startar…</div>
 
@@ -58,12 +74,13 @@
     <label>Notering (valfritt)</label>
     <textarea id="note" rows="2" placeholder="t.ex. 'Februari, hoodie-drop'"></textarea>
 
-    <button id="saveBtn">Spara rad</button>
+    <button id="saveBtn" type="button">Spara rad</button>
     <button class="secondary" id="refreshBtn" type="button">Uppdatera lista</button>
 
     <div class="result" id="calcBox" style="display:none;"></div>
   </div>
 
+  <!-- LISTA -->
   <div class="card">
     <div class="flex">
       <div>
@@ -86,6 +103,8 @@
     const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     const el = (id) => document.getElementById(id);
+
+    // UI
     const statusEl = el("status");
     const partnerSelect = el("partnerSelect");
     const revenueEl = el("revenue");
@@ -97,14 +116,38 @@
     const entriesList = el("entriesList");
     const summaryEl = el("summary");
 
+    // Admin UI
+    const newPartnerNameEl = el("newPartnerName");
+    const createPartnerBtn = el("createPartnerBtn");
+    const reloadPartnersBtn = el("reloadPartnersBtn");
+    const partnersAdminStatusEl = el("partnersAdminStatus");
+
     function setStatus(msg, type="") {
       statusEl.className = "muted " + (type === "ok" ? "ok" : type === "err" ? "err" : "");
       statusEl.textContent = msg;
     }
 
+    function setAdminStatus(msg, type="") {
+      partnersAdminStatusEl.className = "muted " + (type === "ok" ? "ok" : type === "err" ? "err" : "");
+      partnersAdminStatusEl.textContent = msg;
+    }
+
     function sek(n) {
       const x = Number(n || 0);
       return x.toLocaleString("sv-SE", { maximumFractionDigits: 0 }) + " kr";
+    }
+
+    // Svensk slugify (åäö)
+    function slugify(input) {
+      return (input || "")
+        .trim()
+        .toLowerCase()
+        .replace(/å/g, "a")
+        .replace(/ä/g, "a")
+        .replace(/ö/g, "o")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .replace(/-+/g, "-");
     }
 
     async function loadPartners() {
@@ -127,8 +170,14 @@
         return;
       }
 
-      partnerSelect.innerHTML = `<option value="">Välj partner…</option>` +
+      const current = partnerSelect.value;
+
+      partnerSelect.innerHTML =
+        `<option value="">Välj partner…</option>` +
         data.map(p => `<option value="${p.slug}">${p.name}</option>`).join("");
+
+      // Försök behålla vald partner efter reload
+      if (current) partnerSelect.value = current;
 
       setStatus("Redo.", "ok");
     }
@@ -175,18 +224,17 @@
       await loadEntries();
     }
 
-    async function deleteEntry(id) {
-      if (!confirm("Ta bort raden?")) return;
-
+    async function deleteEntry(entryId) {
+      if (!entryId) return;
       setStatus("Tar bort…");
       const { error } = await client
         .from("entries")
         .delete()
-        .eq("id", id);
+        .eq("id", entryId);
 
       if (error) {
         console.error(error);
-        setStatus("Kunde inte ta bort. (Kolla RLS-policy)", "err");
+        setStatus("Kunde inte ta bort. (Kolla DELETE-policy på entries)", "err");
         return;
       }
 
@@ -239,14 +287,47 @@
             </div>
             <div class="small">Kostnader: ${sek(r.costs_sek)} • 30%: ${sek(Number(r.revenue_sek||0)*0.30)}</div>
             ${r.note ? `<div class="small">Not: ${r.note}</div>` : ``}
-            <div class="rowBtns">
-              <button class="secondary" type="button" onclick="deleteEntry('${r.id}')">Ta bort</button>
-            </div>
+            <div class="gap"></div>
+            <button class="danger" type="button" data-del="${r.id}">Ta bort</button>
           </div>
         `;
       }).join("");
 
+      // Koppla delete-knappar
+      document.querySelectorAll("[data-del]").forEach(btn => {
+        btn.addEventListener("click", () => deleteEntry(btn.getAttribute("data-del")));
+      });
+
       setStatus("Redo.", "ok");
+    }
+
+    // ===== ADMIN: skapa partner =====
+    async function createPartner() {
+      const name = (newPartnerNameEl.value || "").trim();
+      if (!name) { setAdminStatus("Skriv ett partnernamn först.", "err"); return; }
+
+      const slug = slugify(name);
+      if (!slug) { setAdminStatus("Kunde inte skapa slug från namnet.", "err"); return; }
+
+      setAdminStatus("Skapar partner…");
+      const { error } = await client
+        .from("partners")
+        .insert([{ slug, name }]);
+
+      if (error) {
+        console.error(error);
+        // Vanliga orsaker: RLS, dublett slug
+        setAdminStatus("Kunde inte skapa partner. (RLS eller slug finns redan)", "err");
+        return;
+      }
+
+      setAdminStatus(`Skapad ✅ (${name})`, "ok");
+      newPartnerNameEl.value = "";
+      await loadPartners();
+
+      // auto-välj nya partnern
+      partnerSelect.value = slug;
+      await loadEntries();
     }
 
     // Events
@@ -254,14 +335,19 @@
     refreshBtn.addEventListener("click", loadEntries);
     partnerSelect.addEventListener("change", loadEntries);
 
+    createPartnerBtn.addEventListener("click", createPartner);
+    reloadPartnersBtn.addEventListener("click", loadPartners);
+
     // Start
     (async () => {
       try {
         await loadPartners();
         await loadEntries();
+        setAdminStatus("Redo.", "ok");
       } catch (e) {
         console.error(e);
         setStatus("Något gick fel vid start.", "err");
+        setAdminStatus("Något gick fel vid start.", "err");
       }
     })();
   </script>
