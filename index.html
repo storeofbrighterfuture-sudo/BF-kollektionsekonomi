@@ -16,6 +16,20 @@
     .result { margin-top: 20px; padding: 15px; background: #f4f4f4; }
   </style>
 </head>
+<script>
+  async function testConnection() {
+    const { data, error } = await supabase.from('partners').select('*');
+    if (error) {
+      console.log("Fel:", error);
+      alert("Något gick fel – kolla Console.");
+    } else {
+      console.log("Partners:", data);
+      alert("Koppling fungerar! Antal partners: " + data.length);
+    }
+  }
+
+  testConnection();
+</script>
 <body>
 
 <h1>BF Kollektionsekonomi</h1>
