@@ -28,6 +28,8 @@
     .item:first-child { border-top: none; }
     .flex { display:flex; gap: 10px; align-items:center; justify-content: space-between; }
     .small { font-size: 13px; color:#555; }
+    .rowBtns { display:flex; gap:10px; flex-wrap: wrap; margin-top:10px; }
+    .rowBtns button { margin-top:0; }
   </style>
 </head>
 <body>
@@ -77,8 +79,8 @@
 
   <script>
     // ========= VIKTIGT: FYLL I DESSA TVÅ =========
-    const SUPABASE_URL = "https://vfkdjsxeqhsfsgpxnqir.supabase.co"; // <-- din URL (ser redan rätt ut)
-    const SUPABASE_KEY = "sb_publishable_i-W2ZVeq8wmTVBsshc1f5Q_2_xMsial";  // <-- klistra in din nyckel här
+    const SUPABASE_URL = "https://vfkdjsxeqhsfsgpxnqir.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_i-W2ZVeq8wmTVBsshc1f5Q_2_xMsial";
     // ===========================================
 
     const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -153,7 +155,6 @@
       const costs_sek = Number(costsEl.value || 0);
       const note = (noteEl.value || "").trim();
 
-      // Visar beräkning direkt
       showCalc(revenue_sek, costs_sek);
 
       setStatus("Sparar…");
@@ -171,6 +172,25 @@
       revenueEl.value = "";
       costsEl.value = "";
       noteEl.value = "";
+      await loadEntries();
+    }
+
+    async function deleteEntry(id) {
+      if (!confirm("Ta bort raden?")) return;
+
+      setStatus("Tar bort…");
+      const { error } = await client
+        .from("entries")
+        .delete()
+        .eq("id", id);
+
+      if (error) {
+        console.error(error);
+        setStatus("Kunde inte ta bort. (Kolla RLS-policy)", "err");
+        return;
+      }
+
+      setStatus("Borttagen ✅", "ok");
       await loadEntries();
     }
 
@@ -219,6 +239,9 @@
             </div>
             <div class="small">Kostnader: ${sek(r.costs_sek)} • 30%: ${sek(Number(r.revenue_sek||0)*0.30)}</div>
             ${r.note ? `<div class="small">Not: ${r.note}</div>` : ``}
+            <div class="rowBtns">
+              <button class="secondary" type="button" onclick="deleteEntry('${r.id}')">Ta bort</button>
+            </div>
           </div>
         `;
       }).join("");
