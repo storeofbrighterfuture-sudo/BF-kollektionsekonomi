@@ -1,56 +1,246 @@
 <!DOCTYPE html>
-<html>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
-  const SUPABASE_URL = "https://vfkdjsxeqhsfsgpxnqir.supabase.co";
-  const SUPABASE_ANON_KEY = "sb_publishable_i-W2ZVeq8wmTVBsshc1f5Q_2_xMsial";
-  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-</script>
+<html lang="sv">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>BF Kollektionsekonomi</title>
   <style>
-    body { font-family: Arial; padding: 40px; max-width: 600px; margin: auto; }
-    input { width: 100%; padding: 8px; margin: 5px 0 15px 0; }
-    button { padding: 10px 15px; background: black; color: white; border: none; cursor: pointer; }
-    .result { margin-top: 20px; padding: 15px; background: #f4f4f4; }
+    body { font-family: Arial, sans-serif; padding: 18px; max-width: 760px; margin: 0 auto; }
+    h1 { margin: 0 0 10px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin: 12px 0; }
+    label { display:block; font-weight: 600; margin: 10px 0 6px; }
+    input, select, textarea {
+      width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px;
+      font-size: 16px; box-sizing: border-box;
+    }
+    button {
+      margin-top: 12px; padding: 12px 14px; border-radius: 10px; border: none;
+      background: black; color: white; font-size: 16px; cursor: pointer;
+    }
+    button.secondary { background: #eee; color: #111; border: 1px solid #ddd; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .muted { color: #666; font-size: 14px; }
+    .ok { color: #0a7a2f; font-weight: 700; }
+    .err { color: #b00020; font-weight: 700; }
+    .result { background: #f6f6f6; padding: 12px; border-radius: 10px; margin-top: 12px; }
+    .list { margin-top: 10px; }
+    .item { padding: 10px; border-top: 1px solid #eee; }
+    .item:first-child { border-top: none; }
+    .flex { display:flex; gap: 10px; align-items:center; justify-content: space-between; }
+    .small { font-size: 13px; color:#555; }
   </style>
 </head>
-<script>
-  async function testConnection() {
-    const { data, error } = await supabase.from('partners').select('*');
-    if (error) {
-      console.log("Fel:", error);
-      alert("Något gick fel – kolla Console.");
-    } else {
-      console.log("Partners:", data);
-      alert("Koppling fungerar! Antal partners: " + data.length);
-    }
-  }
-
-  testConnection();
-</script>
 <body>
+  <h1>BF Kollektionsekonomi</h1>
+  <div class="muted">Logga omsättning & kostnader per partner. Räknar 30% till föreningen.</div>
 
-<h1>BF Kollektionsekonomi</h1>
+  <div class="card">
+    <div class="muted" id="status">Startar…</div>
 
-<label>Total omsättning (SEK)</label>
-<input id="revenue" type="number" placeholder="T.ex 500000">
+    <label>Partner</label>
+    <select id="partnerSelect">
+      <option value="">Laddar partners…</option>
+    </select>
 
-<label>Totala kostnader inkl produktion/frakt (SEK)</label>
-<input id="costs" type="number" placeholder="T.ex 250000">
+    <div class="row">
+      <div>
+        <label>Omsättning (SEK)</label>
+        <input id="revenue" type="number" inputmode="numeric" placeholder="t.ex 10000" />
+      </div>
+      <div>
+        <label>Kostnader (SEK)</label>
+        <input id="costs" type="number" inputmode="numeric" placeholder="t.ex 3000" />
+      </div>
+    </div>
 
-<button onclick="calculate()">Räkna</button>
+    <label>Notering (valfritt)</label>
+    <textarea id="note" rows="2" placeholder="t.ex. 'Februari, hoodie-drop'"></textarea>
 
-<div class="result" id="result"></div>
+    <button id="saveBtn">Spara rad</button>
+    <button class="secondary" id="refreshBtn" type="button">Uppdatera lista</button>
 
-<script>
-function calculate() {
-  let revenue = parseFloat(document.getElementById('revenue').value);
-  let costs = parseFloat(document.getElementById('costs').value);
+    <div class="result" id="calcBox" style="display:none;"></div>
+  </div>
 
-  let kif = revenue * 0.30;
-  let remaining = revenue - kif - costs;
+  <div class="card">
+    <div class="flex">
+      <div>
+        <b>Senaste rader (valda partnern)</b>
+        <div class="small" id="summary"></div>
+      </div>
+    </div>
+    <div class="list" id="entriesList"></div>
+  </div>
 
-  document.getElementById('result').innerHTML =
-    "<strong>Till föreningen (30%):</strong> " + kif.toFixed(0) + "
+  <!-- Supabase JS -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <script>
+    // ========= VIKTIGT: FYLL I DESSA TVÅ =========
+    const SUPABASE_URL = "https://vfkdjsxeqhsfsgpxnqir.supabase.co"; // <-- din URL (ser redan rätt ut)
+    const SUPABASE_KEY = "PASTE_YOUR_PUBLISHABLE_OR_ANON_KEY_HERE";  // <-- klistra in din nyckel här
+    // ===========================================
+
+    const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    const el = (id) => document.getElementById(id);
+    const statusEl = el("status");
+    const partnerSelect = el("partnerSelect");
+    const revenueEl = el("revenue");
+    const costsEl = el("costs");
+    const noteEl = el("note");
+    const saveBtn = el("saveBtn");
+    const refreshBtn = el("refreshBtn");
+    const calcBox = el("calcBox");
+    const entriesList = el("entriesList");
+    const summaryEl = el("summary");
+
+    function setStatus(msg, type="") {
+      statusEl.className = "muted " + (type === "ok" ? "ok" : type === "err" ? "err" : "");
+      statusEl.textContent = msg;
+    }
+
+    function sek(n) {
+      const x = Number(n || 0);
+      return x.toLocaleString("sv-SE", { maximumFractionDigits: 0 }) + " kr";
+    }
+
+    async function loadPartners() {
+      setStatus("Laddar partners…");
+      const { data, error } = await client
+        .from("partners")
+        .select("slug,name")
+        .order("name", { ascending: true });
+
+      if (error) {
+        console.error(error);
+        setStatus("Kunde inte läsa partners. (Kolla nyckel/RLS)", "err");
+        partnerSelect.innerHTML = `<option value="">(fel vid laddning)</option>`;
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        partnerSelect.innerHTML = `<option value="">Inga partners ännu</option>`;
+        setStatus("Inga partners hittades.", "err");
+        return;
+      }
+
+      partnerSelect.innerHTML = `<option value="">Välj partner…</option>` +
+        data.map(p => `<option value="${p.slug}">${p.name}</option>`).join("");
+
+      setStatus("Redo.", "ok");
+    }
+
+    function showCalc(revenue, costs) {
+      const r = Number(revenue || 0);
+      const c = Number(costs || 0);
+      const toPartner = r * 0.30;
+      const remaining = r - toPartner - c;
+
+      calcBox.style.display = "block";
+      calcBox.innerHTML = `
+        <div><b>Till föreningen (30%):</b> ${sek(toPartner)}</div>
+        <div><b>Kostnader:</b> ${sek(c)}</div>
+        <div><b>Kvar:</b> ${sek(remaining)}</div>
+      `;
+    }
+
+    async function saveEntry() {
+      const partner_slug = partnerSelect.value;
+      if (!partner_slug) { setStatus("Välj partner först.", "err"); return; }
+
+      const revenue_sek = Number(revenueEl.value || 0);
+      const costs_sek = Number(costsEl.value || 0);
+      const note = (noteEl.value || "").trim();
+
+      // Visar beräkning direkt
+      showCalc(revenue_sek, costs_sek);
+
+      setStatus("Sparar…");
+      const { error } = await client
+        .from("entries")
+        .insert([{ partner_slug, revenue_sek, costs_sek, note }]);
+
+      if (error) {
+        console.error(error);
+        setStatus("Kunde inte spara. (Kolla RLS-policy på entries)", "err");
+        return;
+      }
+
+      setStatus("Sparat ✅", "ok");
+      revenueEl.value = "";
+      costsEl.value = "";
+      noteEl.value = "";
+      await loadEntries();
+    }
+
+    async function loadEntries() {
+      const partner_slug = partnerSelect.value;
+      if (!partner_slug) {
+        entriesList.innerHTML = `<div class="muted">Välj partner för att se rader.</div>`;
+        summaryEl.textContent = "";
+        return;
+      }
+
+      setStatus("Hämtar rader…");
+      const { data, error } = await client
+        .from("entries")
+        .select("id,partner_slug,revenue_sek,costs_sek,note,created_at")
+        .eq("partner_slug", partner_slug)
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (error) {
+        console.error(error);
+        setStatus("Kunde inte läsa entries. (Kolla RLS-policy)", "err");
+        return;
+      }
+
+      const rows = data || [];
+      const sumRevenue = rows.reduce((a,r)=>a+Number(r.revenue_sek||0), 0);
+      const sumCosts = rows.reduce((a,r)=>a+Number(r.costs_sek||0), 0);
+      const sumToPartner = sumRevenue * 0.30;
+      summaryEl.textContent = `Omsättning: ${sek(sumRevenue)} • Kostnader: ${sek(sumCosts)} • 30%: ${sek(sumToPartner)}`;
+
+      if (rows.length === 0) {
+        entriesList.innerHTML = `<div class="muted">Inga rader ännu för denna partner.</div>`;
+        setStatus("Redo.", "ok");
+        return;
+      }
+
+      entriesList.innerHTML = rows.map(r => {
+        const d = new Date(r.created_at);
+        const dateStr = isNaN(d) ? "" : d.toLocaleString("sv-SE");
+        return `
+          <div class="item">
+            <div class="flex">
+              <div><b>${sek(r.revenue_sek)}</b> <span class="small">omsättning</span></div>
+              <div class="small">${dateStr}</div>
+            </div>
+            <div class="small">Kostnader: ${sek(r.costs_sek)} • 30%: ${sek(Number(r.revenue_sek||0)*0.30)}</div>
+            ${r.note ? `<div class="small">Not: ${r.note}</div>` : ``}
+          </div>
+        `;
+      }).join("");
+
+      setStatus("Redo.", "ok");
+    }
+
+    // Events
+    saveBtn.addEventListener("click", saveEntry);
+    refreshBtn.addEventListener("click", loadEntries);
+    partnerSelect.addEventListener("change", loadEntries);
+
+    // Start
+    (async () => {
+      try {
+        await loadPartners();
+        await loadEntries();
+      } catch (e) {
+        console.error(e);
+        setStatus("Något gick fel vid start.", "err");
+      }
+    })();
+  </script>
+</body>
+</html>
